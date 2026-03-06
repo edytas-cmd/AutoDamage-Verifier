@@ -1,0 +1,5 @@
+{
+  "name": "AutoDamage Verifier",
+  "description": "AI-powered tool to verify if vehicle damages are consistent with the described accident circumstances using image recognition and reasoning.",
+  "requestFramePermissions": ["camera"]
+}
