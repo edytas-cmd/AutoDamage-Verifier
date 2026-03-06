@@ -2,10 +2,18 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
+export interface UnrelatedDamage {
+  description: string;
+  type: "pre_existing" | "unrelated_impact";
+  boundingBox?: [number, number, number, number]; // [ymin, xmin, ymax, xmax] normalized 0-1000
+  imageIndex: number; // Index in the victimImages array
+}
+
 export interface DamageAnalysis {
   damages: string[];
   isConsistent: "Consistent" | "Partially Consistent" | "Inconsistent";
   reasoning: string;
+  unrelatedDamages: UnrelatedDamage[];
 }
 
 export async function analyzeVehicleDamage(
@@ -20,8 +28,7 @@ export async function analyzeVehicleDamage(
       mimeType: "image/jpeg",
       data: img.split(",")[1] || img,
     },
-    // Adding a label to help the model distinguish
-    text: `Zdjęcie pojazdu POSZKODOWANEGO #${index + 1}`
+    text: `Zdjęcie pojazdu POSZKODOWANEGO #${index}`
   }));
 
   const perpetratorImageParts = perpetratorImages.map((img, index) => ({
@@ -29,7 +36,7 @@ export async function analyzeVehicleDamage(
       mimeType: "image/jpeg",
       data: img.split(",")[1] || img,
     },
-    text: `Zdjęcie pojazdu SPRAWCY #${index + 1}`
+    text: `Zdjęcie pojazdu SPRAWCY #${index}`
   }));
 
   const prompt = `
@@ -39,17 +46,29 @@ export async function analyzeVehicleDamage(
     Zadania:
     1. Zidentyfikuj uszkodzenia na pojeździe POSZKODOWANEGO.
     2. Zidentyfikuj uszkodzenia na pojeździe SPRAWCY (jeśli zdjęcia zostały dostarczone).
-    3. Dokonaj ANALIZY PORÓWNAWCZEJ:
-       - Czy uszkodzenia na obu pojazdach (poszkodowanego i sprawcy) korelują ze sobą pod względem wysokości, kształtu i charakteru (np. czy wgniecenie na jednym odpowiada wystającemu elementowi na drugim)?
-       - Czy uszkodzenia obu pojazdów są fizycznie zbieżne z zadeklarowanymi okolicznościami opisanymi przez użytkownika?
-    4. Oceń ogólną wiarygodność zdarzenia.
+    3. Wykryj USZKODZENIA BEZ ZWIĄZKU (unrelated damages) na pojeździe POSZKODOWANEGO. Szukaj:
+       - Śladów korozji wewnątrz zarysowań (sugeruje stary uraz).
+       - Uszkodzeń w miejscach, które nie mogły mieć kontaktu przy opisanym zdarzeniu.
+       - Warstw kurzu/brudu na "świeżych" uszkodzeniach.
+       - Uszkodzeń o innym charakterze (np. pionowe rysy przy zderzeniu bocznym).
+    4. Dokonaj ANALIZY PORÓWNAWCZEJ między pojazdami.
     5. Całość analizy musi być w języku polskim.
+
+    Dla każdego wykrytego uszkodzenia bez związku podaj jego opis oraz współrzędne bounding box [ymin, xmin, ymax, xmax] w skali 0-1000, odnoszące się do konkretnego zdjęcia poszkodowanego (imageIndex).
 
     Zwróć wynik w formacie JSON zgodnie ze schematem:
     {
-      "damages": ["lista zidentyfikowanych uszkodzeń na obu pojazdach"],
+      "damages": ["lista wszystkich uszkodzeń"],
       "isConsistent": "Consistent" | "Partially Consistent" | "Inconsistent",
-      "reasoning": "szczegółowa analiza porównawcza w języku polskim, wyjaśniająca korelację (lub jej brak) między uszkodzeniami obu pojazdów w kontekście opisu zdarzenia"
+      "reasoning": "szczegółowa analiza porównawcza i uzasadnienie",
+      "unrelatedDamages": [
+        {
+          "description": "opis uszkodzenia bez związku",
+          "type": "pre_existing" | "unrelated_impact",
+          "boundingBox": [ymin, xmin, ymax, xmax],
+          "imageIndex": 0
+        }
+      ]
     }
   `;
 
@@ -57,8 +76,8 @@ export async function analyzeVehicleDamage(
     model,
     contents: {
       parts: [
-        ...victimImageParts.flatMap(p => [p.inlineData ? { inlineData: p.inlineData } : null, { text: p.text }].filter(Boolean) as any),
-        ...perpetratorImageParts.flatMap(p => [p.inlineData ? { inlineData: p.inlineData } : null, { text: p.text }].filter(Boolean) as any),
+        ...victimImageParts.flatMap(p => [{ inlineData: p.inlineData }, { text: p.text }]),
+        ...perpetratorImageParts.flatMap(p => [{ inlineData: p.inlineData }, { text: p.text }]),
         { text: prompt }
       ],
     },
@@ -70,19 +89,32 @@ export async function analyzeVehicleDamage(
           damages: {
             type: Type.ARRAY,
             items: { type: Type.STRING },
-            description: "List of identified damages",
           },
           isConsistent: {
             type: Type.STRING,
             enum: ["Consistent", "Partially Consistent", "Inconsistent"],
-            description: "Verdict on consistency",
           },
           reasoning: {
             type: Type.STRING,
-            description: "Detailed explanation of the analysis",
+          },
+          unrelatedDamages: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                description: { type: Type.STRING },
+                type: { type: Type.STRING, enum: ["pre_existing", "unrelated_impact"] },
+                boundingBox: {
+                  type: Type.ARRAY,
+                  items: { type: Type.NUMBER },
+                },
+                imageIndex: { type: Type.INTEGER },
+              },
+              required: ["description", "type", "imageIndex"],
+            },
           },
         },
-        required: ["damages", "isConsistent", "reasoning"],
+        required: ["damages", "isConsistent", "reasoning", "unrelatedDamages"],
       },
     },
   });

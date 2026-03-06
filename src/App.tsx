@@ -12,14 +12,65 @@ import {
   ChevronRight,
   Image as ImageIcon,
   Trash2,
-  Download
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { analyzeVehicleDamage, extractTextFromImage, type DamageAnalysis } from './services/geminiService';
+import { analyzeVehicleDamage, extractTextFromImage, type DamageAnalysis, type UnrelatedDamage } from './services/geminiService';
 import Markdown from 'react-markdown';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+
+const DamageOverlay = ({ image, damages }: { image: string, damages: UnrelatedDamage[] }) => {
+  return (
+    <div className="relative rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+      <img src={image} alt="Analiza uszkodzeń" className="w-full h-auto block" referrerPolicy="no-referrer" />
+      <svg 
+        className="absolute inset-0 w-full h-full pointer-events-none" 
+        viewBox="0 0 1000 1000" 
+        preserveAspectRatio="none"
+      >
+        {damages.map((d, i) => {
+          if (!d.boundingBox) return null;
+          const [ymin, xmin, ymax, xmax] = d.boundingBox;
+          return (
+            <g key={i}>
+              <rect
+                x={xmin}
+                y={ymin}
+                width={xmax - xmin}
+                height={ymax - ymin}
+                fill="none"
+                stroke="#f43f5e"
+                strokeWidth="6"
+                className="animate-pulse"
+              />
+              <rect
+                x={xmin}
+                y={ymin - 45 > 0 ? ymin - 45 : ymin}
+                width="180"
+                height="40"
+                fill="#f43f5e"
+                className="opacity-90"
+              />
+              <text
+                x={xmin + 10}
+                y={ymin - 45 > 0 ? ymin - 15 : ymin + 25}
+                fill="white"
+                fontSize="28"
+                fontWeight="bold"
+                className="select-none"
+              >
+                {d.type === 'pre_existing' ? 'STARE' : 'BEZ ZWIĄZKU'}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -514,6 +565,42 @@ export default function App() {
                             </div>
                           </div>
                         </section>
+
+                        {/* Unrelated Damages Section */}
+                        {result.unrelatedDamages && result.unrelatedDamages.length > 0 && (
+                          <section className="space-y-6 pt-6 border-t border-slate-100">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 text-rose-500" />
+                              <h4 className="text-xs font-bold text-slate-900 uppercase tracking-widest">Wykryte Uszkodzenia Bez Związku</h4>
+                            </div>
+                            <div className="space-y-8">
+                              {Array.from(new Set(result.unrelatedDamages.map(d => d.imageIndex))).map(imgIdx => (
+                                <div key={imgIdx} className="space-y-4">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Zdjęcie pojazdu poszkodowanego #{imgIdx + 1}:</p>
+                                  <DamageOverlay 
+                                    image={victimImages[imgIdx]} 
+                                    damages={result.unrelatedDamages.filter(d => d.imageIndex === imgIdx)} 
+                                  />
+                                  <ul className="space-y-3">
+                                    {result.unrelatedDamages.filter(d => d.imageIndex === imgIdx).map((d, i) => (
+                                      <li key={i} className="flex gap-3 text-sm text-slate-600 bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
+                                        <div className="mt-1">
+                                          <div className={`w-2.5 h-2.5 rounded-full ${d.type === 'pre_existing' ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                                        </div>
+                                        <div>
+                                          <span className="font-bold text-slate-900 block mb-0.5">
+                                            {d.type === 'pre_existing' ? 'Prawdopodobnie stare uszkodzenie:' : 'Brak związku ze zdarzeniem:'}
+                                          </span>
+                                          {d.description}
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        )}
                       </div>
                     </div>
 
