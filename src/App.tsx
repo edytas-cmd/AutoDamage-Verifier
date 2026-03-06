@@ -175,29 +175,66 @@ export default function App() {
         logging: false,
         backgroundColor: '#ffffff',
         onclone: (clonedDoc) => {
+          // Remove all existing styles to prevent html2canvas from parsing oklch/oklab
+          const styles = clonedDoc.getElementsByTagName('style');
+          const links = clonedDoc.getElementsByTagName('link');
+          for (let i = styles.length - 1; i >= 0; i--) styles[i].remove();
+          for (let i = links.length - 1; i >= 0; i--) {
+            if (links[i].rel === 'stylesheet') links[i].remove();
+          }
+
+          // Add a simple B&W stylesheet for the export
+          const styleTag = clonedDoc.createElement('style');
+          styleTag.innerHTML = `
+            * {
+              color: #000000 !important;
+              background-color: transparent !important;
+              border-color: #000000 !important;
+              box-shadow: none !important;
+              text-shadow: none !important;
+              filter: none !important;
+              fill: #000000 !important;
+              stroke: #000000 !important;
+            }
+            .bg-white, .bg-slate-50, .bg-indigo-50, .bg-emerald-50, .bg-amber-50, .bg-rose-50 {
+              background-color: #ffffff !important;
+            }
+            img {
+              filter: grayscale(100%) !important;
+            }
+            svg {
+              fill: #000000 !important;
+              stroke: #000000 !important;
+            }
+          `;
+          clonedDoc.head.appendChild(styleTag);
+
           const elements = clonedDoc.getElementsByTagName('*');
           for (let i = 0; i < elements.length; i++) {
             const el = elements[i] as HTMLElement;
             
-            // Force Black & White for PDF export
+            // Force standard colors to avoid oklch parsing errors in html2canvas
             el.style.color = '#000000';
             el.style.fill = '#000000';
             el.style.stroke = '#000000';
             
-            // Handle backgrounds - keep them white or transparent
             const style = window.getComputedStyle(el);
             if (style.backgroundColor !== 'rgba(0, 0, 0, 0)' && style.backgroundColor !== 'transparent') {
               el.style.backgroundColor = '#ffffff';
             }
             
-            // Force borders to be visible in B&W
-            if (style.borderWidth !== '0px') {
+            if (style.borderWidth !== '0px' && style.borderStyle !== 'none') {
               el.style.borderColor = '#000000';
             }
-            
-            // Remove any shadows for cleaner B&W print
-            el.style.boxShadow = 'none';
-            el.style.textShadow = 'none';
+
+            // Remove any inline oklch
+            const colorProps = ['backgroundColor', 'borderColor', 'color', 'fill', 'stroke', 'outlineColor'];
+            colorProps.forEach(prop => {
+              const val = (el.style as any)[prop];
+              if (val && (val.includes('oklch') || val.includes('oklab'))) {
+                (el.style as any)[prop] = prop.includes('background') ? '#ffffff' : '#000000';
+              }
+            });
           }
         }
       });
@@ -237,6 +274,10 @@ export default function App() {
         className: 'text-rose-600 bg-rose-50 border-rose-100',
         style: { color: '#e11d48', backgroundColor: '#fff1f2', borderColor: '#ffe4e6' }
       };
+      case 'Insufficient Data': return { 
+        className: 'text-indigo-600 bg-indigo-50 border-indigo-100',
+        style: { color: '#4f46e5', backgroundColor: '#eef2ff', borderColor: '#e0e7ff' }
+      };
       default: return { 
         className: 'text-slate-600 bg-slate-50 border-slate-100',
         style: { color: '#475569', backgroundColor: '#f8fafc', borderColor: '#f1f5f9' }
@@ -249,6 +290,7 @@ export default function App() {
       case 'Consistent': return <CheckCircle2 className="w-5 h-5" />;
       case 'Partially Consistent': return <AlertCircle className="w-5 h-5" />;
       case 'Inconsistent': return <XCircle className="w-5 h-5" />;
+      case 'Insufficient Data': return <Loader2 className="w-5 h-5" />;
       default: return null;
     }
   };
@@ -258,6 +300,7 @@ export default function App() {
       case 'Consistent': return 'Zgodne';
       case 'Partially Consistent': return 'Częściowo zgodne';
       case 'Inconsistent': return 'Niezgodne';
+      case 'Insufficient Data': return 'Niewystarczające dane';
       default: return status;
     }
   };
@@ -565,6 +608,27 @@ export default function App() {
                             </div>
                           </div>
                         </section>
+
+                        {/* Missing Info Section */}
+                        {result.isConsistent === 'Insufficient Data' && result.missingInfo && result.missingInfo.length > 0 && (
+                          <section className="space-y-4 p-5 bg-indigo-50/50 rounded-2xl border border-indigo-100">
+                            <h4 className="text-xs font-bold text-indigo-600 uppercase tracking-widest flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4" />
+                              Wymagane dodatkowe informacje
+                            </h4>
+                            <ul className="space-y-2">
+                              {result.missingInfo.map((info, i) => (
+                                <li key={i} className="flex items-start gap-2.5 text-sm text-indigo-900">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+                                  {info}
+                                </li>
+                              ))}
+                            </ul>
+                            <p className="text-[10px] text-indigo-400 font-medium italic">
+                              Uzupełnij powyższe dane, aby umożliwić AI przeprowadzenie rzetelnej analizy.
+                            </p>
+                          </section>
+                        )}
 
                         {/* Unrelated Damages Section */}
                         {result.unrelatedDamages && result.unrelatedDamages.length > 0 && (

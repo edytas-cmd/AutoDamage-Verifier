@@ -11,9 +11,10 @@ export interface UnrelatedDamage {
 
 export interface DamageAnalysis {
   damages: string[];
-  isConsistent: "Consistent" | "Partially Consistent" | "Inconsistent";
+  isConsistent: "Consistent" | "Partially Consistent" | "Inconsistent" | "Insufficient Data";
   reasoning: string;
   unrelatedDamages: UnrelatedDamage[];
+  missingInfo?: string[]; // New field for specifying what's missing
 }
 
 export async function analyzeVehicleDamage(
@@ -40,27 +41,27 @@ export async function analyzeVehicleDamage(
   }));
 
   const prompt = `
-    Przeanalizuj dostarczone zdjęcia pojazdów oraz poniższy opis zdarzenia drogowego:
+    Jesteś ekspertem ds. rekonstrukcji wypadków drogowych i rzeczoznawcą samochodowym. 
+    Przeanalizuj dostarczone zdjęcia pojazdów oraz poniższy opis zdarzenia:
     "${description}"
 
-    Zadania:
-    1. Zidentyfikuj uszkodzenia na pojeździe POSZKODOWANEGO.
-    2. Zidentyfikuj uszkodzenia na pojeździe SPRAWCY (jeśli zdjęcia zostały dostarczone).
-    3. Wykryj USZKODZENIA BEZ ZWIĄZKU (unrelated damages) na pojeździe POSZKODOWANEGO. Szukaj:
-       - Śladów korozji wewnątrz zarysowań (sugeruje stary uraz).
-       - Uszkodzeń w miejscach, które nie mogły mieć kontaktu przy opisanym zdarzeniu.
-       - Warstw kurzu/brudu na "świeżych" uszkodzeniach.
-       - Uszkodzeń o innym charakterze (np. pionowe rysy przy zderzeniu bocznym).
-    4. Dokonaj ANALIZY PORÓWNAWCZEJ między pojazdami.
-    5. Całość analizy musi być w języku polskim.
+    Twoim zadaniem jest przeprowadzenie rygorystycznej analizy technicznej. 
 
-    Dla każdego wykrytego uszkodzenia bez związku podaj jego opis oraz współrzędne bounding box [ymin, xmin, ymax, xmax] w skali 0-1000, odnoszące się do konkretnego zdjęcia poszkodowanego (imageIndex).
+    WAŻNA ZASADA (BRAK DANYCH):
+    Jeśli dostarczony materiał (zdjęcia lub opis) jest niewystarczający do wykonania rzetelnej analizy porównawczej o wysokim stopniu prawdopodobieństwa, NIE WOLNO Ci czynić bezpodstawnych założeń ani "wymyślać" przebiegu zdarzenia. 
+    W takim przypadku ustaw "isConsistent" na "Insufficient Data" i w polu "missingInfo" wymień konkretnie, czego brakuje (np. zdjęcia konkretnej strony pojazdu sprawcy, zbliżenia na uszkodzenie, pomiary wysokości uszkodzeń, bardziej szczegółowy opis prędkości itp.).
+
+    KRYTERIA ANALIZY (jeśli dane są wystarczające):
+    1. IDENTYFIKACJA USZKODZEŃ: Kierunkowość, zakres, wektor siły.
+    2. ANALIZA FIZYKI I MATERIAŁÓW: Zachowanie materiałów, parametry pojazdów (masa, gabaryty), logika prędkości.
+    3. WYKRYWANIE USZKODZEŃ BEZ ZWIĄZKU: Korozja, brud, inne wektory siły.
+    4. ANALIZA PORÓWNAWCZA: Kompatybilność wysokości i kształtów między pojazdami.
 
     Zwróć wynik w formacie JSON zgodnie ze schematem:
     {
-      "damages": ["lista wszystkich uszkodzeń"],
-      "isConsistent": "Consistent" | "Partially Consistent" | "Inconsistent",
-      "reasoning": "szczegółowa analiza porównawcza i uzasadnienie",
+      "damages": ["lista zidentyfikowanych uszkodzeń"],
+      "isConsistent": "Consistent" | "Partially Consistent" | "Inconsistent" | "Insufficient Data",
+      "reasoning": "Szczegółowa ekspertyza techniczna LUB wyjaśnienie dlaczego dane są niewystarczające.",
       "unrelatedDamages": [
         {
           "description": "opis uszkodzenia bez związku",
@@ -68,7 +69,8 @@ export async function analyzeVehicleDamage(
           "boundingBox": [ymin, xmin, ymax, xmax],
           "imageIndex": 0
         }
-      ]
+      ],
+      "missingInfo": ["lista brakujących elementów, jeśli isConsistent to Insufficient Data"]
     }
   `;
 
@@ -92,7 +94,7 @@ export async function analyzeVehicleDamage(
           },
           isConsistent: {
             type: Type.STRING,
-            enum: ["Consistent", "Partially Consistent", "Inconsistent"],
+            enum: ["Consistent", "Partially Consistent", "Inconsistent", "Insufficient Data"],
           },
           reasoning: {
             type: Type.STRING,
@@ -112,6 +114,10 @@ export async function analyzeVehicleDamage(
               },
               required: ["description", "type", "imageIndex"],
             },
+          },
+          missingInfo: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
           },
         },
         required: ["damages", "isConsistent", "reasoning", "unrelatedDamages"],
